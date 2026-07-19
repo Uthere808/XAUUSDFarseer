@@ -35,7 +35,6 @@ class Config:
 
 def load_config() -> Config:
     missing = []
-
     def get(name: str) -> str:
         v = os.environ.get(name, "").strip()
         if not v:
@@ -64,7 +63,9 @@ def is_trading_day_berlin(dt_berlin: datetime) -> bool:
 
 def should_run_now(dt_berlin: datetime) -> bool:
     # We’ll schedule a UTC window and only run when it’s 20:00 in Berlin.
-    return dt_berlin.hour == 20
+    # Manual test runs can override this with FORCE_SEND=true.
+    force = os.environ.get("FORCE_SEND", "").strip().lower() in {"1", "true", "yes", "y"}
+    return force or (dt_berlin.hour == 20)
 
 
 def build_report(dt_berlin: datetime) -> tuple[str, str]:
