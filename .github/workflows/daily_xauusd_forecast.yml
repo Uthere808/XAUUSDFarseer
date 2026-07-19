@@ -6,7 +6,13 @@ on:
     # We run a small UTC window and let the script gate on Europe/Berlin local 20:00.
     - cron: '7 18 * * 1-5'
     - cron: '7 19 * * 1-5'
-  workflow_dispatch: {}
+  workflow_dispatch:
+    inputs:
+      force_send:
+        description: 'Send email even if it is not 20:00 Europe/Berlin (for testing)'
+        required: false
+        type: boolean
+        default: false
 
 jobs:
   forecast:
@@ -29,5 +35,6 @@ jobs:
           SMTP_USER: ${{ secrets.SMTP_USER }}
           SMTP_PASS: ${{ secrets.SMTP_PASS }}
           MAIL_TO: ${{ secrets.MAIL_TO }}
+          FORCE_SEND: ${{ github.event_name == 'workflow_dispatch' && inputs.force_send }}
         run: |
           python run_xauusd_forecast.py
