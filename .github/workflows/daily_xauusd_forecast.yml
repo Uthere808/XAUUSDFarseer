@@ -1,0 +1,33 @@
+name: XAUUSD daily forecast
+
+on:
+  schedule:
+    # GitHub Actions schedule uses cron syntax (UTC by default).
+    # We run a small UTC window and let the script gate on Europe/Berlin local 20:00.
+    - cron: '7 18 * * 1-5'
+    - cron: '7 19 * * 1-5'
+  workflow_dispatch: {}
+
+jobs:
+  forecast:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Run forecast + email report
+        env:
+          SMTP_HOST: ${{ secrets.SMTP_HOST }}
+          SMTP_PORT: ${{ secrets.SMTP_PORT }}
+          SMTP_USER: ${{ secrets.SMTP_USER }}
+          SMTP_PASS: ${{ secrets.SMTP_PASS }}
+          MAIL_TO: ${{ secrets.MAIL_TO }}
+        run: |
+          python run_xauusd_forecast.py
