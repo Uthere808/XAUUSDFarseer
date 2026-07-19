@@ -3,9 +3,10 @@ name: XAUUSD daily forecast
 on:
   schedule:
     # GitHub Actions schedule uses cron syntax (UTC by default).
-    # We run a small UTC window and let the script gate on Europe/Berlin local 20:00.
-    - cron: '7 18 * * 1-5'
-    - cron: '7 19 * * 1-5'
+    # We run daily and let the script gate on Europe/Berlin local 20:00.
+    # This allows Sunday 20:00 Berlin runs to prepare Monday's forecast.
+    - cron: '7 18 * * *'
+    - cron: '7 19 * * *'
   workflow_dispatch:
     inputs:
       force_send:
