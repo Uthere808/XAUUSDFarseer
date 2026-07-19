@@ -16,7 +16,7 @@ import os
 import smtplib
 import ssl
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timedelta
 from email.message import EmailMessage
 from zoneinfo import ZoneInfo
 
@@ -56,9 +56,39 @@ def load_config() -> Config:
     return cfg
 
 
-def is_trading_day_berlin(dt_berlin: datetime) -> bool:
-    # Simple definition requested: Monday–Friday.
-    return dt_berlin.weekday() < 5
+def next_trading_day_berlin(dt_berlin: datetime) -> datetime:
+    """Return a datetime (same tz) representing the next trading day date.
+
+    Trading days are defined simply as Monday–Friday.
+    """
+    d = dt_berlin
+    while True:
+        d = d.replace(hour=0, minute=0, second=0, microsecond=0) + timedelta(days=1)
+        if d.weekday() < 5:
+            return d
+
+
+def should_run_today(dt_berlin: datetime) -> bool:
+    """Whether we should produce a forecast now.
+
+    Rule: run on any day (including Sunday) *if tomorrow is a trading day*.
+    Manual test runs can override with FORCE_SEND=true.
+    """
+    force = os.environ.get("FORCE_SEND", "").strip().lower() in {"1", "true", "yes", "y"}
+    if force:
+        return True
+
+    # Only run at 20:00 Berlin.
+    if dt_berlin.hour != 20:
+        return False
+
+    # If the next calendar day that is Mon–Fri exists (it always does), then run.
+    # Specifically: we want a report for the *next trading day*.
+    nt = next_trading_day_berlin(dt_berlin)
+    # If next trading day is tomorrow (or later after weekend), we still want to run daily at 20:00.
+    # But if today is a trading day, this just forecasts tomorrow.
+    # If today is Sunday, this forecasts Monday.
+    return nt.date() != dt_berlin.date()
 
 
 def should_run_now(dt_berlin: datetime) -> bool:
@@ -69,8 +99,12 @@ def should_run_now(dt_berlin: datetime) -> bool:
 
 
 def build_report(dt_berlin: datetime) -> tuple[str, str]:
-    """Return (filename, file_content)."""
-    analysis_date = dt_berlin.date().isoformat()
+    """Return (filename, file_content).
+
+    The report is for the *next trading day* (Mon–Fri).
+    """
+    target_day = next_trading_day_berlin(dt_berlin).date()
+    analysis_date = target_day.isoformat()
 
     # Placeholder forecast logic (to be replaced with real research model).
     predicted_move_usd = 0.0
@@ -114,12 +148,12 @@ def main() -> None:
 
     now_berlin = datetime.now(tz=BERLIN)
 
-    if not is_trading_day_berlin(now_berlin):
-        print("Not a trading day (Mon–Fri). Exiting.")
-        return
-
-    if not should_run_now(now_berlin):
-        print(f"Not 20:00 in Europe/Berlin (now {now_berlin.isoformat()}). Exiting.")
+    if not should_run_today(now_berlin):
+        print(
+            "Skip run. "
+            f"now_berlin={now_berlin.isoformat()} "
+            f"force_send={os.environ.get('FORCE_SEND','').strip()}"
+        )
         return
 
     attachment_name, attachment_text = build_report(now_berlin)
