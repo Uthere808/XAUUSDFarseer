@@ -1,27 +1,22 @@
 #!/usr/bin/env python3
-"""XAUUSD Farseer — daily high/low volatility forecast + email delivery.
+"""XAUUSD Farseer — email sender.
 
-Creates a .txt report and emails it via SMTP.
-- Timezone: Europe/Berlin
-- Trading days: Mon–Fri
-- Threshold: $70 close-to-close move
+Reads the latest forecast .txt file from the forecasts/ directory
+and emails it as an attachment.
 
-This initial version is a deterministic skeleton that can be extended
-with real research/data sources.
+This script is triggered by GitHub Actions when a new forecast file
+is pushed to the repo (by the Langdock scheduled task via GitHub integration).
 """
 
 from __future__ import annotations
 
+import glob
 import os
 import smtplib
 import ssl
+import sys
 from dataclasses import dataclass
-from datetime import datetime, timedelta
 from email.message import EmailMessage
-from zoneinfo import ZoneInfo
-
-
-BERLIN = ZoneInfo("Europe/Berlin")
 
 
 @dataclass(frozen=True)
@@ -35,6 +30,7 @@ class Config:
 
 def load_config() -> Config:
     missing = []
+
     def get(name: str) -> str:
         v = os.environ.get(name, "").strip()
         if not v:
@@ -56,68 +52,32 @@ def load_config() -> Config:
     return cfg
 
 
-def next_trading_day_berlin(dt_berlin: datetime) -> datetime:
-    """Return a datetime (same tz) representing the next trading day date.
+def find_latest_forecast() -> tuple[str, str]:
+    """Find the most recent XAUUSD_*.txt file in forecasts/ directory.
 
-    Trading days are defined simply as Monday–Friday.
+    Returns (filename, file_content).
     """
-    d = dt_berlin
-    while True:
-        d = d.replace(hour=0, minute=0, second=0, microsecond=0) + timedelta(days=1)
-        if d.weekday() < 5:
-            return d
+    pattern = os.path.join("forecasts", "XAUUSD_*.txt")
+    files = sorted(glob.glob(pattern))
 
+    if not files:
+        raise SystemExit("No forecast files found in forecasts/ directory.")
 
-def should_run_today(dt_berlin: datetime) -> bool:
-    """Whether we should produce a forecast now.
+    latest = files[-1]
+    filename = os.path.basename(latest)
 
-    Rule: run on any day (including Sunday) *if tomorrow is a trading day*.
-    Manual test runs can override with FORCE_SEND=true.
-    """
-    force = os.environ.get("FORCE_SEND", "").strip().lower() in {"1", "true", "yes", "y"}
-    if force:
-        return True
+    with open(latest, "r", encoding="utf-8") as f:
+        content = f.read()
 
-    # Only run at 20:00 Berlin.
-    if dt_berlin.hour != 20:
-        return False
-
-    # If the next calendar day that is Mon–Fri exists (it always does), then run.
-    # Specifically: we want a report for the *next trading day*.
-    nt = next_trading_day_berlin(dt_berlin)
-    # If next trading day is tomorrow (or later after weekend), we still want to run daily at 20:00.
-    # But if today is a trading day, this just forecasts tomorrow.
-    # If today is Sunday, this forecasts Monday.
-    return nt.date() != dt_berlin.date()
-
-
-def should_run_now(dt_berlin: datetime) -> bool:
-    # We’ll schedule a UTC window and only run when it’s 20:00 in Berlin.
-    # Manual test runs can override this with FORCE_SEND=true.
-    force = os.environ.get("FORCE_SEND", "").strip().lower() in {"1", "true", "yes", "y"}
-    return force or (dt_berlin.hour == 20)
-
-
-def build_report(dt_berlin: datetime) -> tuple[str, str]:
-    """Return (filename, file_content).
-
-    The report is for the *next trading day* (Mon–Fri).
-    """
-    target_day = next_trading_day_berlin(dt_berlin).date()
-    analysis_date = target_day.isoformat()
-
-    # Placeholder forecast logic (to be replaced with real research model).
-    predicted_move_usd = 0.0
-    high_trading_day = abs(predicted_move_usd) >= 70.0
-
-    content = (
-        f"date={analysis_date}\n"
-        f"predicted_price_movement_usd={predicted_move_usd:.2f}\n"
-        f"high_trading_day={str(high_trading_day).lower()}\n"
-    )
-
-    filename = f"XAUUSD_{analysis_date}.txt"
+    print(f"Found forecast file: {latest}")
     return filename, content
+
+
+def extract_date_from_filename(filename: str) -> str:
+    """Extract date from XAUUSD_YYYY-MM-DD.txt format."""
+    # Remove prefix and suffix
+    name = filename.replace("XAUUSD_", "").replace(".txt", "")
+    return name
 
 
 def send_email(cfg: Config, subject: str, body: str, attachment_name: str, attachment_text: str) -> None:
@@ -146,23 +106,17 @@ def send_email(cfg: Config, subject: str, body: str, attachment_name: str, attac
 def main() -> None:
     cfg = load_config()
 
-    now_berlin = datetime.now(tz=BERLIN)
+    filename, content = find_latest_forecast()
+    forecast_date = extract_date_from_filename(filename)
 
-    if not should_run_today(now_berlin):
-        print(
-            "Skip run. "
-            f"now_berlin={now_berlin.isoformat()} "
-            f"force_send={os.environ.get('FORCE_SEND','').strip()}"
-        )
-        return
+    subject = f"XAUUSD forecast — {forecast_date}"
+    body = (
+        f"Attached is the XAUUSD high/low trading day forecast for {forecast_date}.\n\n"
+        f"--- Preview ---\n{content}"
+    )
 
-    attachment_name, attachment_text = build_report(now_berlin)
-
-    subject = f"XAUUSD forecast — {now_berlin.date().isoformat()}"
-    body = "Attached is the daily XAUUSD high/low trading day forecast (.txt)."
-
-    send_email(cfg, subject, body, attachment_name, attachment_text)
-    print("Email sent.")
+    send_email(cfg, subject, body, filename, content)
+    print(f"Email sent to {cfg.mail_to} for forecast date {forecast_date}.")
 
 
 if __name__ == "__main__":
